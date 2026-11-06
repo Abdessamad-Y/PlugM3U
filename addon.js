@@ -60,9 +60,9 @@ async function getCatalog(type, id, files) {
         id: `iptv:${channel.url}`,
         type: "tv",
         name: channel.name,
-        poster: channel.tvg.logo || null,
+        poster: channel.tvgLogo || null,
         posterShape: "landscape",
-        description: `Group: ${channel.group.title || "N/A"}`,
+        description: `Group: ${channel.groupTitle || "N/A"}`,
       };
     });
 
