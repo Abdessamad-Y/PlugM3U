@@ -29,6 +29,13 @@ function generateManifestId(files) {
   return `community.iptv.${hash.digest("hex")}`;
 }
 
+// One catalog per playlist file, e.g. morocco.m3u -> "iptv-morocco" / "Morocco".
+const catalogId = (file) => "iptv-" + file.replace(/\.m3u$/, "").toLowerCase();
+const catalogName = (file) => {
+  const base = file.replace(/\.m3u$/, "").replace(/[-_]+/g, " ");
+  return base.charAt(0).toUpperCase() + base.slice(1);
+};
+
 function getManifest(files) {
   files = safeFiles(files);
   const fileNames = files.map((f) => f.replace(".m3u", "")).join(", ");
@@ -40,7 +47,11 @@ function getManifest(files) {
     description: `Provides TV channels from selected M3U playlists: ${fileNames}`,
     resources: ["catalog", "meta", "stream"],
     types: ["tv"],
-    catalogs: [{ type: "tv", id: "iptv-channels", name: "IPTV Channels" }],
+    catalogs: files.map((file) => ({
+      type: "tv",
+      id: catalogId(file),
+      name: catalogName(file),
+    })),
     idPrefixes: ["iptv:"],
   };
 }
@@ -71,10 +82,12 @@ function toMeta(channel) {
 }
 
 async function getCatalog(type, id, files) {
-  if (type === "tv" && id === "iptv-channels") {
-    return { metas: loadChannels(files).map(toMeta) };
-  }
-  return { metas: [] };
+  if (type !== "tv") return { metas: [] };
+  const selected =
+    id === "iptv-channels" // old single-catalog id
+      ? files
+      : safeFiles(files).filter((f) => catalogId(f) === id);
+  return { metas: loadChannels(selected).map(toMeta) };
 }
 
 async function getMeta(type, id, files) {
