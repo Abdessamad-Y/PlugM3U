@@ -1,5 +1,7 @@
 // server.js
-// This server now hosts a web UI for configuration and serves the addon dynamically.
+// Hosts a web UI for configuration and serves the addon dynamically.
+// The selected playlists are carried in the URL path (/<files>/manifest.json) so
+// that Stremio keeps them for every later catalog/meta/stream request.
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
@@ -7,79 +9,79 @@ const addon = require("./addon");
 
 const app = express();
 const port = process.env.PORT || 7000;
-
 const M3U_DIR = path.join(__dirname, "m3u");
 
-// Define a cache header value to be reused across routes.
-// s-maxage=3600: Cache on Vercel's Edge Network for 1 hour.
-// stale-while-revalidate=86400: Serve stale content for 24 hours while revalidating.
-// This greatly improves performance and reduces serverless function invocations.
 const CACHE_HEADER = "public, s-maxage=3600, stale-while-revalidate=86400";
 
-// Serve the web configuration page from the 'public' directory.
+// Stremio (especially the web version) needs CORS headers.
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 
-// API endpoint to list available M3U files for the configuration page.
+const parseFiles = (value) =>
+  addon.safeFiles(
+    String(value || "")
+      .split(",")
+      .map((f) => f.trim())
+      .filter(Boolean)
+  );
+
+// List the available M3U files for the configuration page.
 app.get("/api/files", (req, res) => {
   fs.readdir(M3U_DIR, (err, files) => {
     if (err) {
       console.error("Could not list the directory.", err);
-      res.status(500).send("Server error");
-      return;
+      return res.status(500).send("Server error");
     }
-    // Filter for .m3u files only.
-    const m3uFiles = files.filter((file) => file.endsWith(".m3u"));
-    res.json(m3uFiles);
+    res.json(files.filter((file) => file.endsWith(".m3u")));
   });
 });
 
-// Stremio manifest request. This is the entry point for the addon installation.
-app.get("/manifest.json", (req, res) => {
-  // The selected files are passed as a comma-separated query parameter.
-  const files = req.query.files ? req.query.files.split(",") : [];
-  if (files.length === 0) {
-    return res
-      .status(400)
-      .send(
-        "No M3U files selected. Please configure the addon via the web interface."
-      );
-  }
-  const manifest = addon.getManifest(files);
-
-  // **OPTIMIZATION**
-  // Set the caching headers for the manifest response.
-  res.setHeader("Cache-Control", CACHE_HEADER);
+function sendJson(res, body, cache) {
+  if (cache) res.setHeader("Cache-Control", CACHE_HEADER);
   res.setHeader("Content-Type", "application/json");
-  res.send(manifest);
-});
+  res.send(body);
+}
 
-// Stremio catalog request. This is called when a user opens the addon's catalog in Stremio.
-app.get("/catalog/:type/:id.json", async (req, res) => {
-  const { type, id } = req.params;
-  // The configuration (selected files) must be passed along in the request from Stremio.
-  const files = req.query.files ? req.query.files.split(",") : [];
+// Registers the addon routes under an optional /:config prefix.
+// config = comma-separated .m3u file names (path form), or ?files= (query form).
+function register(prefix, getFiles) {
+  app.get(`${prefix}/manifest.json`, (req, res) => {
+    const files = getFiles(req);
+    if (files.length === 0) {
+      return res
+        .status(400)
+        .send("No M3U files selected. Please configure the addon via the web interface.");
+    }
+    sendJson(res, addon.getManifest(files), true);
+  });
 
-  const catalog = await addon.getCatalog(type, id, files);
+  app.get(`${prefix}/catalog/:type/:id.json`, async (req, res) => {
+    sendJson(res, await addon.getCatalog(req.params.type, req.params.id, getFiles(req)), true);
+  });
+  // Stremio may append extra args (e.g. /catalog/tv/id/skip=0.json)
+  app.get(`${prefix}/catalog/:type/:id/:extra.json`, async (req, res) => {
+    sendJson(res, await addon.getCatalog(req.params.type, req.params.id, getFiles(req)), true);
+  });
 
-  // **OPTIMIZATION**
-  // Set the caching headers for the catalog response.
-  res.setHeader("Cache-Control", CACHE_HEADER);
-  res.setHeader("Content-Type", "application/json");
-  res.send(catalog);
-});
+  app.get(`${prefix}/meta/:type/:id.json`, async (req, res) => {
+    sendJson(res, await addon.getMeta(req.params.type, req.params.id, getFiles(req)), true);
+  });
 
-// Stremio stream request. This is called when a user clicks on a channel to play it.
-app.get("/stream/:type/:id.json", async (req, res) => {
-  const { type, id } = req.params;
-  const streams = await addon.getStreams(type, id);
+  app.get(`${prefix}/stream/:type/:id.json`, async (req, res) => {
+    sendJson(res, await addon.getStreams(req.params.type, req.params.id), false);
+  });
+}
 
-  // Stream responses are typically not cached as they are single-use and dynamic.
-  res.setHeader("Content-Type", "application/json");
-  res.send(streams);
-});
+register("/:config", (req) => parseFiles(decodeURIComponent(req.params.config)));
+register("", (req) => parseFiles(req.query.files));
 
 app.listen(port, () => {
-  console.log(
-    `Addon server running. Open http://localhost:${port} to configure.`
-  );
+  console.log(`Addon server running. Open http://localhost:${port} to configure.`);
 });
+
+module.exports = app;

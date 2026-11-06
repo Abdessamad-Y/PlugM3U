@@ -1,5 +1,5 @@
 // addon.js
-// This file now contains functions to dynamically generate addon responses.
+// Generates Stremio addon responses for the selected M3U playlists.
 
 const { parseM3U } = require("@iptv/playlist");
 const fs = require("fs");
@@ -8,81 +8,90 @@ const crypto = require("crypto");
 
 const M3U_DIR = path.join(__dirname, "m3u");
 
-// Generates a unique ID based on the selected files to keep the manifest consistent
+// Only plain *.m3u file names inside the m3u directory are allowed.
+function safeFiles(files) {
+  return files.filter(
+    (f) => /^[\w.\- ]+\.m3u$/.test(f) && path.basename(f) === f
+  );
+}
+
+// Channel ids carry the stream URL, encoded so they are safe inside a URL path.
+function encodeId(url) {
+  return "iptv:" + Buffer.from(url, "utf8").toString("base64url");
+}
+function decodeId(id) {
+  return Buffer.from(id.slice("iptv:".length), "base64url").toString("utf8");
+}
+
 function generateManifestId(files) {
   const hash = crypto.createHash("md5");
-  hash.update(files.sort().join(","));
+  hash.update([...files].sort().join(","));
   return `community.iptv.${hash.digest("hex")}`;
 }
 
 function getManifest(files) {
-  const manifestId = generateManifestId(files);
+  files = safeFiles(files);
   const fileNames = files.map((f) => f.replace(".m3u", "")).join(", ");
 
   return {
-    id: manifestId,
-    version: "1.0.0",
+    id: generateManifestId(files),
+    version: "1.1.0",
     name: `IPTV (${fileNames})`,
     description: `Provides TV channels from selected M3U playlists: ${fileNames}`,
-    resources: ["catalog", "stream"],
+    resources: ["catalog", "meta", "stream"],
     types: ["tv"],
-    catalogs: [
-      {
-        type: "tv",
-        id: "iptv-channels",
-        name: "IPTV Channels",
-        // Pass the selected files to the catalog handler via query params
-        extra: [{ name: "files", isRequired: true }],
-      },
-    ],
+    catalogs: [{ type: "tv", id: "iptv-channels", name: "IPTV Channels" }],
     idPrefixes: ["iptv:"],
+  };
+}
+
+function loadChannels(files) {
+  let allChannels = [];
+  for (const file of safeFiles(files)) {
+    try {
+      const m3uContent = fs.readFileSync(path.join(M3U_DIR, file), "utf8");
+      allChannels = allChannels.concat(parseM3U(m3uContent).channels);
+    } catch (error) {
+      console.error(`Error processing file ${file}:`, error);
+    }
+  }
+  return allChannels;
+}
+
+function toMeta(channel) {
+  return {
+    id: encodeId(channel.url),
+    type: "tv",
+    name: channel.name,
+    poster: channel.tvgLogo || null,
+    logo: channel.tvgLogo || null,
+    posterShape: "landscape",
+    description: `Group: ${channel.groupTitle || "N/A"}`,
   };
 }
 
 async function getCatalog(type, id, files) {
   if (type === "tv" && id === "iptv-channels") {
-    let allChannels = [];
-
-    for (const file of files) {
-      try {
-        const filePath = path.join(M3U_DIR, file);
-        const m3uContent = fs.readFileSync(filePath, "utf8");
-        const playlist = parseM3U(m3uContent);
-        allChannels = allChannels.concat(playlist.channels);
-      } catch (error) {
-        console.error(`Error processing file ${file}:`, error);
-        // Skip this file and continue with others
-      }
-    }
-
-    const metas = allChannels.map((channel) => {
-      return {
-        id: `iptv:${channel.url}`,
-        type: "tv",
-        name: channel.name,
-        poster: channel.tvgLogo || null,
-        posterShape: "landscape",
-        description: `Group: ${channel.groupTitle || "N/A"}`,
-      };
-    });
-
-    return { metas };
+    return { metas: loadChannels(files).map(toMeta) };
   }
   return { metas: [] };
 }
 
+async function getMeta(type, id, files) {
+  if (type === "tv" && id.startsWith("iptv:")) {
+    const meta = loadChannels(files)
+      .map(toMeta)
+      .find((m) => m.id === id);
+    if (meta) return { meta };
+  }
+  return { meta: {} };
+}
+
 async function getStreams(type, id) {
   if (type === "tv" && id.startsWith("iptv:")) {
-    const streamUrl = id.replace("iptv:", "");
-    const streams = [
-      {
-        url: streamUrl,
-        title: "Live Stream",
-      },
-    ];
-    return { streams };
+    return { streams: [{ url: decodeId(id), title: "Live Stream" }] };
   }
   return { streams: [] };
 }
 
-module.exports = { getManifest, getCatalog, getStreams };
+module.exports = { getManifest, getCatalog, getMeta, getStreams, safeFiles };

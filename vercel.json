@@ -6,8 +6,8 @@
       "use": "@vercel/node"
     },
     {
-        "src": "public/**",
-        "use": "@vercel/static"
+      "src": "public/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -16,20 +16,40 @@
       "dest": "/server.js"
     },
     {
-        "src": "/manifest.json",
-        "dest": "/server.js"
+      "src": "/manifest.json",
+      "dest": "/server.js"
     },
     {
-        "src": "/catalog/:type/:id.json",
-        "dest": "/server.js"
+      "src": "/catalog/(.*)",
+      "dest": "/server.js"
     },
     {
-        "src": "/stream/:type/:id.json",
-        "dest": "/server.js"
+      "src": "/meta/(.*)",
+      "dest": "/server.js"
     },
     {
-        "src": "/(.*)",
-        "dest": "/public/$1"
+      "src": "/stream/(.*)",
+      "dest": "/server.js"
+    },
+    {
+      "src": "/([^/]+)/manifest.json",
+      "dest": "/server.js"
+    },
+    {
+      "src": "/([^/]+)/catalog/(.*)",
+      "dest": "/server.js"
+    },
+    {
+      "src": "/([^/]+)/meta/(.*)",
+      "dest": "/server.js"
+    },
+    {
+      "src": "/([^/]+)/stream/(.*)",
+      "dest": "/server.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
     }
   ]
 }

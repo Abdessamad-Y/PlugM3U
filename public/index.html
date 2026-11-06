@@ -158,8 +158,8 @@
             return;
           }
 
-          const baseUrl = `${window.location.origin}/manifest.json`;
-          const fullUrl = `${baseUrl}?files=${selectedFiles.join(",")}`;
+          const config = encodeURIComponent(selectedFiles.join(","));
+          const fullUrl = `${window.location.origin}/${config}/manifest.json`;
 
           installUrlInput.value = fullUrl;
           installLink.href = `stremio://install?url=${encodeURIComponent(
