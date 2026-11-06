@@ -51,6 +51,7 @@ function getManifest(files) {
       type: "tv",
       id: catalogId(file),
       name: catalogName(file),
+      extra: [{ name: "search", isRequired: false }],
     })),
     idPrefixes: ["iptv:"],
   };
@@ -81,13 +82,37 @@ function toMeta(channel) {
   };
 }
 
-async function getCatalog(type, id, files) {
+// Case- and space-insensitive match, so "medi1" finds "Medi 1 TV Arabic".
+const normalize = (text) => String(text).toLowerCase().replace(/[\s_.-]+/g, "");
+
+function parseExtra(extra) {
+  const out = {};
+  for (const part of String(extra || "").split("&")) {
+    const i = part.indexOf("=");
+    if (i > 0) {
+      try {
+        out[part.slice(0, i)] = decodeURIComponent(part.slice(i + 1));
+      } catch (e) {
+        out[part.slice(0, i)] = part.slice(i + 1);
+      }
+    }
+  }
+  return out;
+}
+
+async function getCatalog(type, id, files, extra) {
   if (type !== "tv") return { metas: [] };
   const selected =
     id === "iptv-channels" // old single-catalog id
       ? files
       : safeFiles(files).filter((f) => catalogId(f) === id);
-  return { metas: loadChannels(selected).map(toMeta) };
+  let metas = loadChannels(selected).map(toMeta);
+  const search = parseExtra(extra).search;
+  if (search) {
+    const q = normalize(search);
+    metas = metas.filter((m) => normalize(m.name).includes(q));
+  }
+  return { metas };
 }
 
 async function getMeta(type, id, files) {

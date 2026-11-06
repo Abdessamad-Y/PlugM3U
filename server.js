@@ -65,7 +65,11 @@ function register(prefix, getFiles) {
   });
   // Stremio may append extra args (e.g. /catalog/tv/id/skip=0.json)
   app.get(`${prefix}/catalog/:type/:id/:extra.json`, async (req, res) => {
-    sendJson(res, await addon.getCatalog(req.params.type, req.params.id, getFiles(req)), true);
+    sendJson(
+      res,
+      await addon.getCatalog(req.params.type, req.params.id, getFiles(req), req.params.extra),
+      true
+    );
   });
 
   app.get(`${prefix}/meta/:type/:id.json`, async (req, res) => {
